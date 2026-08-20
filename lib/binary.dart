@@ -1,12 +1,13 @@
 import "dart:typed_data";
 import "dart:convert";
+import "dart:math" show pow;
 
 enum BinaryUnitWidth {
   byte(8), half(16), word(32),
   doub(64), quod(128), long(256),
   sedec(512), trigind(1024);
 
-  BinaryUnitWidth(this.size);
+  const BinaryUnitWidth(this.size);
 
   final int size;
 
@@ -50,7 +51,7 @@ extension Uint2List on int {
   Uint8List toDouble([int offset = 0])
     => this.toBinary(BinaryUnitWidth.doub, offset);
   
-  //toUnit()
+  //U toUnit<U extends BinaryUnit>()
 }
 
 extension List2Uint on Uint8List {
@@ -70,24 +71,27 @@ extension List2Uint on Uint8List {
   Doub toDouble()
     => Doub.fromList(this);
 
-  U toUnit<U extends BinaryUnit>()
+  //U toUnit<U extends BinaryUnit>()
 }
 
 abstract class BinaryUnit {
-  final BinaryUnitWidth width;
-  List<int> get _value;
+  BinaryUnitWidth get width;
+  List<int> get value;
 }
 abstract class BinaryUnitSingle
     extends BinaryUnit {
-  final int value;
+  final int _value;
+  
+  BinaryUnitSingle(this._value);
+  
   @override
-  List<int> get _value;
-    => <int>[this.value];
+  List<int> get value
+    => <int>[this._value];
 
   int bitOf(int offset)
-    => (this.value >> (this.width.size - offset)) & 1;
+    => (this._value >> (this.width.size - offset)) & 1;
   int msbs(int length)
-    => (this.value >> (this.width.size - length)) & List<int>.generate(length, (i) => 1 << i).reduce((int prev, int curr) => prev | curr);
+    => (this._value >> (this.width.size - length)) & List<int>.generate(length, (i) => 1 << i).reduce((int prev, int curr) => prev | curr);
   int get msb => this.msbs(1);
 
   static int _check(cand, size)
@@ -97,19 +101,19 @@ abstract class BinaryUnitSingle
 abstract class BinaryUnitMulti
     extends BinaryUnit {
   Word partOf(int loc)
-    => Word(this._value.sublist(loc, 1).single);
+    => Word(this.value.sublist(loc, 1).single);
 }
 
 class Word extends BinaryUnitSingle {
   @override
   final BinaryUnitWidth width
     = BinaryUnitWidth.word;
-  @override
-  const Word._(super.value);
+  
+  Word._(super._value);
   factory Word(int ui32)
     => Word._(Word.check(ui32));
   static int check(int cand)
-    => BinaryUnitSingle._check(cand, 32)
+    => BinaryUnitSingle._check(cand, 32);
 }
 class Doub extends BinaryUnitMulti {
   @override
@@ -118,15 +122,24 @@ class Doub extends BinaryUnitMulti {
   final int high;
   final int low;
 
-  const Doub(int high, int low)
+  Doub(int high, int low):
     this.high = Word.check(high),
     this.low = Word.check(low);
-  const Doub.from(int ui32):
+  Doub.from(int ui32):
     this.high = 0,
     this.low = Word.check(ui32);
-  Doub.fromList(List<int> ui8arr, [int offset == 0]):
-    this.high = ui8arr.sublist(offset, offset + BinaryUnitWidth.word.bytes).toUint(BinaryUnitWidth.word),
-    this.low = ui8arr.sublist(offset + BinaryUnitWidth.word.bytes, offset + BinaryUnitWidth.word.bytes * 2).toUint(BinaryUnitWidth.word);
+  Doub.fromList(List<int> ui8arr,
+    [int offset = 0]):
+    this.high = Uint8List.fromList(
+      ui8arr.sublist(offset,
+        offset + BinaryUnitWidth.word.bytes))
+      .toUint(BinaryUnitWidth.word),
+    this.low = Uint8List.fromList(
+      ui8arr.sublist(
+        offset + BinaryUnitWidth.word.bytes,
+        offset + BinaryUnitWidth.word.bytes * 2))
+      .toUint(BinaryUnitWidth.word);
+
   static Doub parse(String input){
     late String base;
     late String highS;
@@ -145,12 +158,14 @@ class Doub extends BinaryUnitMulti {
       if (isHex) {
         base = input.substring(2);
       } else {
-        RegExpMatch m = isHex2.firstMatch(input)!;
+        RegExpMatch m = hexUInt2.firstMatch(input)!;
         
         if(!m.groupNames.contains("val")){
           throw 0;
         }
-        base = m.group("val")!.replaceAll(" ", "");
+        String basei = input.substring(input.indexOf("{"));
+        base = basei.substring(0, input.length - 1);
+        // m.groupByName("val")!.replaceAll(" ", "");
       }
       
       if (base.length <= hexWide) {
@@ -169,9 +184,10 @@ class Doub extends BinaryUnitMulti {
   
   String toHexString([bool? useAltHead = false]){
     String head = useAltHead == null ? "" : (useAltHead ? "xh" : "0x");
-    String highS = (this.high == 0 ? "" : this.high.toRadixString(16);
-    Strong lowSN = this.low.toRadixString(16);
+    String highS = (this.high == 0 ? "" : this.high.toRadixString(16));
+    String lowSN = this.low.toRadixString(16);
     String lowS = (this.high == 0 ? lowSN : lowSN.padLeft(8, "0"));
+    return head + highS + lowS;
   }
 
   Uint8List toBinary([int offset = 0])
@@ -182,7 +198,7 @@ class Doub extends BinaryUnitMulti {
         .toList());
 
   @override
-  List<int> get _value
+  List<int> get value
     => <int>[this.high, this.low];
   @override
   String toString() {
@@ -193,7 +209,7 @@ class Doub extends BinaryUnitMulti {
   bool operator ==(Object other)
     => other is Doub && this.high == other.high && this.low == other.low;
   @override
-  int hashCode => Object.hash(this.high, this.low);
+  int get hashCode => Object.hash(this.high, this.low);
 }
 
 final RegExp hexUInt = RegExp(r"^(xh|0x)[0-9a-fA-F]+$");
